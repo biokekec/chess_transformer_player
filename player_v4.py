@@ -9,14 +9,15 @@ from chess_tournament.players import Player
 
 class TransformerPlayer(Player):
     """
-    Player v4: legal-move LM scoring + opening bias + safety + 1-ply material gain.
+    Player v4 (improved): legal-move LM scoring + opening bias + safety + 1-ply material gain + check tie-break.
 
     Design goals:
     - ALWAYS returns a legal move (fallback ~0)
     - Avoids obviously bad early moves (opening bias)
-    - Avoids hanging the queen for free (cheap tactical filter)
+    - Avoids hanging MAJOR pieces for free (queen + rooks)
     - Converts RandomPlayer blunders by preferring captures / material gain
-      among top-scored LM candidates (still not an engine).
+      among top-scored LM candidates (still not an engine)
+    - Breaks ties with "gives check" then LM score
     """
 
     PIECE_VALUE = {
@@ -33,9 +34,9 @@ class TransformerPlayer(Player):
         name: str = "PlayerV4",
         model_id: str = "distilgpt2",
         batch_size: int = 64,
-        top_k: int = 10,          # consider more candidates than v3
-        opening_plies: int = 12,  # slightly longer opening help
-        max_candidates: int = 12  # how many top LM moves we consider for material filter
+        top_k: int = 16,
+        opening_plies: int = 16,
+        max_candidates: int = 24,
     ):
         super().__init__(name)
         self.model_id = model_id
@@ -87,20 +88,18 @@ class TransformerPlayer(Player):
         return None
 
     # -------------------------
-    # Safety: don't hang queen for free
+    # Safety: don't hang major pieces for free
     # -------------------------
-    def _queen_hangs_for_free(self, board: chess.Board, my_color: bool) -> bool:
-        queens = list(board.pieces(chess.QUEEN, my_color))
-        if not queens:
-            return False
-        qsq = queens[0]
-
-        attackers = len(board.attackers(not my_color, qsq))
-        if attackers == 0:
-            return False
-
-        defenders = len(board.attackers(my_color, qsq))
-        return defenders == 0
+    def _piece_hangs_for_free(self, board: chess.Board, my_color: bool, piece_type: int) -> bool:
+        squares = list(board.pieces(piece_type, my_color))
+        for sq in squares:
+            attackers = len(board.attackers(not my_color, sq))
+            if attackers == 0:
+                continue
+            defenders = len(board.attackers(my_color, sq))
+            if defenders == 0:
+                return True
+        return False
 
     def _passes_safety(self, board_before: chess.Board, move_uci: str) -> bool:
         my_color = board_before.turn
@@ -109,7 +108,10 @@ class TransformerPlayer(Player):
         board_after = board_before.copy()
         board_after.push(mv)
 
-        if self._queen_hangs_for_free(board_after, my_color):
+        # Don't hang major pieces for free
+        if self._piece_hangs_for_free(board_after, my_color, chess.QUEEN):
+            return False
+        if self._piece_hangs_for_free(board_after, my_color, chess.ROOK):
             return False
 
         return True
@@ -127,10 +129,6 @@ class TransformerPlayer(Player):
         return self._material(board, my_color) - self._material(board, not my_color)
 
     def _move_material_gain(self, board: chess.Board, move_uci: str) -> int:
-        """
-        Material gain from making move_uci (1-ply lookahead).
-        Huge reward if it delivers checkmate.
-        """
         my_color = board.turn
         before = self._material_balance(board, my_color)
 
@@ -142,6 +140,11 @@ class TransformerPlayer(Player):
 
         after = self._material_balance(b2, my_color)
         return after - before
+
+    def _gives_check(self, board: chess.Board, move_uci: str) -> bool:
+        b2 = board.copy()
+        b2.push(chess.Move.from_uci(move_uci))
+        return b2.is_check()
 
     # -------------------------
     # LM Scoring
@@ -215,11 +218,13 @@ class TransformerPlayer(Player):
             # Consider top N ranked moves (LM) and pick best by:
             # 1) safety filter
             # 2) material gain (1-ply)
-            # 3) LM score as tie-breaker
+            # 3) gives check
+            # 4) LM score
             candidates = ranked[: max(self.top_k, self.max_candidates)]
 
             best_mv = None
             best_gain = -10_000
+            best_check = False
             best_lm = -1e30
 
             for mv, lm_sc in candidates:
@@ -227,11 +232,19 @@ class TransformerPlayer(Player):
                     continue
 
                 gain = self._move_material_gain(board, mv)
+                gives_check = self._gives_check(board, mv)
 
-                if (gain > best_gain) or (gain == best_gain and lm_sc > best_lm):
-                    best_gain = gain
-                    best_lm = lm_sc
-                    best_mv = mv
+                if best_mv is None:
+                    best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
+                    continue
+
+                if gain > best_gain:
+                    best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
+                elif gain == best_gain:
+                    if gives_check and not best_check:
+                        best_mv, best_check, best_lm = mv, gives_check, lm_sc
+                    elif gives_check == best_check and lm_sc > best_lm:
+                        best_mv, best_lm = mv, lm_sc
 
             if best_mv is not None:
                 return best_mv
