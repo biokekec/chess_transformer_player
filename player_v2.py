@@ -89,6 +89,31 @@ class TransformerPlayer(Player):
 
         return best_move
 
+    @torch.inference_mode()
+    def debug_rank_moves(self, fen: str, top_k: int = 10):
+        import chess
+        board = chess.Board(fen)
+        legal = [m.uci() for m in board.legal_moves]
+        prompt = self._build_prompt(fen)
+    
+        # score in one batch
+        texts = [prompt + mv for mv in legal]
+        enc = self.tokenizer(texts, return_tensors="pt", padding=True, add_special_tokens=False).to(self.device)
+        logits = self.model(**enc).logits
+        logprobs = torch.log_softmax(logits, dim=-1)
+    
+        prompt_len = len(self.tokenizer(prompt, add_special_tokens=False)["input_ids"])
+        token_lp = logprobs[:, :-1, :].gather(2, enc.input_ids[:, 1:].unsqueeze(-1)).squeeze(-1)
+    
+        cont_mask = enc.attention_mask[:, 1:].clone()
+        cont_mask[:, :max(prompt_len - 1, 0)] = 0
+    
+        lengths = cont_mask.sum(dim=1).clamp_min(1)
+        scores = (token_lp * cont_mask).sum(dim=1) / lengths
+    
+        pairs = sorted(zip(legal, scores.tolist()), key=lambda x: x[1], reverse=True)
+        return pairs[:top_k]
+
     def get_move(self, fen: str) -> Optional[str]:
         board = chess.Board(fen)
         legal_uci = [m.uci() for m in board.legal_moves]
