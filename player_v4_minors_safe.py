@@ -9,14 +9,12 @@ from chess_tournament.players import Player
 
 class TransformerPlayer(Player):
     """
-    Player v4 (improved): legal-move LM scoring + opening bias + safety + 1-ply material gain + check tie-break.
-
-    Design goals:
+    Player: legal-move LM scoring + opening bias + safety + 1-ply material gain + check tie-break.
     - ALWAYS returns a legal move (fallback ~0)
     - Avoids obviously bad early moves (opening bias)
     - Avoids hanging MAJOR pieces for free (queen + rooks)
     - Converts RandomPlayer blunders by preferring captures / material gain
-      among top-scored LM candidates (still not an engine)
+      among top-scored LM candidates
     - Breaks ties with "gives check" then LM score
     """
 
