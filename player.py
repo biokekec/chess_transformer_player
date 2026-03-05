@@ -257,7 +257,7 @@ class TransformerPlayer(Player):
     # -------------------------
     # Main API
     # -------------------------
-    def get_move(self, fen: str) -> Optional[str]:
+def get_move(self, fen: str) -> Optional[str]:
     board = chess.Board(fen)
     legal_moves = list(board.legal_moves)
     if not legal_moves:
@@ -314,4 +314,4 @@ class TransformerPlayer(Player):
         return ranked[0][0] if ranked else self.rng.choice(legal_uci)
 
     except Exception:
-        return self.rng.choice(legal_uci)
+        return self.rng.choice(legal_uci))
