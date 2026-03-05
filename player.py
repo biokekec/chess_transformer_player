@@ -254,64 +254,64 @@ class TransformerPlayer(Player):
         scored.sort(key=lambda x: x[1], reverse=True)
         return scored
 
-    # -------------------------
-    # Main API
-    # -------------------------
-def get_move(self, fen: str) -> Optional[str]:
-    board = chess.Board(fen)
-    legal_moves = list(board.legal_moves)
-    if not legal_moves:
-        return None
-    legal_uci = [m.uci() for m in legal_moves]
-
-    # Opening bias
-    opening_mv = self._opening_choice(board, legal_uci)
-    if opening_mv is not None:
-        return opening_mv
-
-    # Load model
-    try:
-        self._load_model()
-    except Exception:
-        return self.rng.choice(legal_uci)
-
-    prompt = self._build_prompt(fen)
-
-    try:
-        ranked = self._score_moves(prompt, legal_uci)
-
-        # evaluate top max(top_k, max_candidates)
-        candidates = ranked[: max(self.top_k, self.max_candidates)]
-
-        best_mv = None
-        best_gain = -10_000
-        best_check = False
-        best_lm = -1e30
-
-        for mv, lm_sc in candidates:
-            if not self._passes_safety(board, mv):
-                continue
-
-            gain = self._move_material_gain(board, mv)
-            gives_check = self._gives_check(board, mv)
-
-            if best_mv is None:
-                best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
-                continue
-
-            if gain > best_gain:
-                best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
-            elif gain == best_gain:
-                if gives_check and not best_check:
-                    best_mv, best_check, best_lm = mv, gives_check, lm_sc
-                elif gives_check == best_check and lm_sc > best_lm:
-                    best_mv, best_lm = mv, lm_sc
-
-        if best_mv is not None:
-            return best_mv
-
-        # Fallback: best LM move (still legal)
-        return ranked[0][0] if ranked else self.rng.choice(legal_uci)
-
-    except Exception:
-        return self.rng.choice(legal_uci))
+        # -------------------------
+        # Main API
+        # -------------------------
+        def get_move(self, fen: str) -> Optional[str]:
+            board = chess.Board(fen)
+            legal_moves = list(board.legal_moves)
+            if not legal_moves:
+                return None
+            legal_uci = [m.uci() for m in legal_moves]
+    
+            # Opening bias
+            opening_mv = self._opening_choice(board, legal_uci)
+            if opening_mv is not None:
+                return opening_mv
+    
+            # Load model
+            try:
+                self._load_model()
+            except Exception:
+                return self.rng.choice(legal_uci)
+    
+            prompt = self._build_prompt(fen)
+    
+            try:
+                ranked = self._score_moves(prompt, legal_uci)
+    
+                # evaluate top max(top_k, max_candidates)
+                candidates = ranked[: max(self.top_k, self.max_candidates)]
+    
+                best_mv = None
+                best_gain = -10_000
+                best_check = False
+                best_lm = -1e30
+    
+                for mv, lm_sc in candidates:
+                    if not self._passes_safety(board, mv):
+                        continue
+    
+                    gain = self._move_material_gain(board, mv)
+                    gives_check = self._gives_check(board, mv)
+    
+                    if best_mv is None:
+                        best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
+                        continue
+    
+                    if gain > best_gain:
+                        best_mv, best_gain, best_check, best_lm = mv, gain, gives_check, lm_sc
+                    elif gain == best_gain:
+                        if gives_check and not best_check:
+                            best_mv, best_check, best_lm = mv, gives_check, lm_sc
+                        elif gives_check == best_check and lm_sc > best_lm:
+                            best_mv, best_lm = mv, lm_sc
+    
+                if best_mv is not None:
+                    return best_mv
+    
+                # Fallback: best LM move (still legal)
+                return ranked[0][0] if ranked else self.rng.choice(legal_uci)
+    
+            except Exception:
+                return self.rng.choice(legal_uci)
